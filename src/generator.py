@@ -1,5 +1,5 @@
-from diagrams import Diagram, Cluster
-from src.mapper import get_diagram_node
+from diagrams import Diagram, Cluster, Edge
+from src.resources.registry import get_resource_handler
 import json
 
 def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, outformat="png"):
@@ -8,24 +8,26 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
 
     resources = plan.get('configuration', {}).get('root_module', {}).get('resources', [])
     
-    nodes = {}  # address -> {class_ref, name, parent_addr}
-    clusters = {} # address -> {type: 'vpc'|'subnet', name: str}
+    nodes = {}  # address -> {handler, parent_addr}
+    clusters = {} # address -> {type: 'vpc'|'subnet', label: str}
     edges = [] # (source_addr, target_addr)
 
-    # 1. Identify Clusters (VPCs and Subnets)
+    # 1. Identify Clusters (VPCs and Subnets) & Create Handlers
     for res in resources:
         res_type = res['type']
         address = res['address']
         
-        name_val = res['name']
-        if 'expressions' in res and 'name' in res['expressions']:
-            if 'constant_value' in res['expressions']['name']:
-                name_val = res['expressions']['name']['constant_value']
+        handler = get_resource_handler(res)
+        
+        # We assume handlers exist for network/subnet even if we don't draw nodes for them
+        # so we can use get_label()
         
         if res_type == 'google_compute_network':
-            clusters[address] = {'type': 'vpc', 'name': name_val}
+            label = handler.get_label() if handler else res['name']
+            clusters[address] = {'type': 'vpc', 'label': label}
         elif res_type == 'google_compute_subnetwork':
-             clusters[address] = {'type': 'subnet', 'name': name_val}
+             label = handler.get_label() if handler else res['name']
+             clusters[address] = {'type': 'subnet', 'label': label}
 
     # Helper to find parent: Prioritize Subnet over VPC
     def find_parent_cluster(res_expressions):
@@ -54,26 +56,24 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
         if vpcs: return vpcs[0] # Return first vpc found
         return None
 
-    # 2. Identify Nodes and Assign to Clusters
+    # 2. Identify Nodes (Resources) and Assign to Clusters
     for res in resources:
         res_type = res['type']
         address = res['address']
         
-        # Name resolution
-        name_val = res['name']
-        if 'expressions' in res and 'name' in res['expressions']:
-            if 'constant_value' in res['expressions']['name']:
-                name_val = res['expressions']['name']['constant_value']
+        # Skip cluster resources (networks/subnets) as nodes, unless we want to show them BOTH as cluster and node.
+        # Usually we don't.
+        if res_type in ['google_compute_network', 'google_compute_subnetwork']:
+            continue
+
+        handler = get_resource_handler(res)
         
-        # Use mapper to get the Diagram class
-        diagram_class = get_diagram_node(res_type)
-        
-        if diagram_class:
+        if handler:
             # Find parent
             expressions = res.get('expressions', {})
             parent_addr = find_parent_cluster(expressions)
             
-            nodes[address] = {'class_ref': diagram_class, 'name': name_val, 'parent_addr': parent_addr}
+            nodes[address] = {'handler': handler, 'parent_addr': parent_addr}
 
     # 3. Identify Edges (Dependencies)
     for res in resources:
@@ -104,26 +104,32 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
                      # Found a dependency: Source -> Target
                      edges.append((source_addr, target_addr))
 
-    # 4. Render Diagram Directly
+    # 4. Render Diagram
     node_instances = {} # address -> instantiated Diagram node object
     
-    # We use a graph attribute to control direction or other viz properties if needed
+    # Enhanced Graph Attributes
     graph_attr = {
-        "fontsize": "20"
+        "fontsize": "25",
+        "bgcolor": "white",
+        "splines": "ortho",
+        "nodesep": "0.8",
+        "ranksep": "1.0",
     }
 
-    with Diagram("Terraform Infrastructure", show=show, filename=output_filename, outformat=outformat, graph_attr=graph_attr):
+    with Diagram("Terraform Infrastructure", show=show, filename=output_filename, outformat=outformat, graph_attr=graph_attr, direction="LR"):
         
         # Recursive writer for clusters
         def render_cluster(cluster_addr):
             cluster_data = clusters[cluster_addr]
-            with Cluster(cluster_data["name"]):
+            # Use the detailed label from the handler
+            with Cluster(cluster_data["label"]):
                 # Instantiate nodes belonging to this cluster
                 cluster_node_addrs = [addr for addr, node in nodes.items() if node['parent_addr'] == cluster_addr]
                 for node_addr in cluster_node_addrs:
                     node_data = nodes[node_addr]
-                    # Create the node!
-                    node_instances[node_addr] = node_data['class_ref'](node_data['name'])
+                    handler = node_data['handler']
+                    # Create the node using handler's label and class
+                    node_instances[node_addr] = handler.diagram_class(handler.get_label())
                 
                 # Render child clusters (Subnets inside VPCs)
                 if cluster_data['type'] == 'vpc':
@@ -147,11 +153,13 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
         global_nodes = [addr for addr, node in nodes.items() if node['parent_addr'] is None]
         for node_addr in global_nodes:
             node_data = nodes[node_addr]
-            node_instances[node_addr] = node_data['class_ref'](node_data['name'])
+            handler = node_data['handler']
+            node_instances[node_addr] = handler.diagram_class(handler.get_label())
 
         # Edges
         for src, dst in set(edges):
             if src in node_instances and dst in node_instances:
+                # We could potentially get edge labels from handlers if we extended the system further
                 node_instances[src] >> node_instances[dst]
     
     print(f"Diagram created: {output_filename}.{outformat}")
