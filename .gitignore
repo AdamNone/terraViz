@@ -1,3 +1,23 @@
-.venv/
-*.json
+# Terraform generated files
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
 *.binary
+*.json
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Output images
+output/*.png
+output/*.jpg
+output/*.dot
+
+# Logs
+*.log
+
+# Virtual Envs
+.venv
