@@ -15,6 +15,7 @@ venv/
 output/*.png
 output/*.jpg
 output/*.dot
+output/*.svg
 
 # Logs
 *.log

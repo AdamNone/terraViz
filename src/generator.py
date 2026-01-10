@@ -2,7 +2,7 @@ from diagrams import Diagram, Cluster
 from src.mapper import get_diagram_node
 import json
 
-def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=True):
+def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, outformat="png"):
     with open(plan_path, 'r') as f:
         plan = json.load(f)
 
@@ -112,7 +112,7 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=True):
         "fontsize": "20"
     }
 
-    with Diagram("Terraform Infrastructure", show=show, filename=output_filename, graph_attr=graph_attr):
+    with Diagram("Terraform Infrastructure", show=show, filename=output_filename, outformat=outformat, graph_attr=graph_attr):
         
         # Recursive writer for clusters
         def render_cluster(cluster_addr):
@@ -154,4 +154,4 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=True):
             if src in node_instances and dst in node_instances:
                 node_instances[src] >> node_instances[dst]
     
-    print(f"Diagram created: {output_filename}.png")
+    print(f"Diagram created: {output_filename}.{outformat}")
