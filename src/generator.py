@@ -1,22 +1,5 @@
 import json
-import re
-
-# Mapping Terraform resources to Diagram classes
-TF_TO_DIAGRAMS = {
-    "google_compute_instance": "ComputeEngine",
-    "google_sql_database_instance": "SQL",
-    "google_storage_bucket": "Storage",
-    "google_compute_firewall": "FirewallRules",
-    "google_sql_database": "SQL", # Logical DB
-}
-
-# Imports required for the generated script
-DIAGRAM_IMPORTS = {
-    "ComputeEngine": "from diagrams.gcp.compute import ComputeEngine",
-    "SQL": "from diagrams.gcp.database import SQL",
-    "Storage": "from diagrams.gcp.storage import Storage",
-    "FirewallRules": "from diagrams.gcp.network import FirewallRules",
-}
+from src.mapper import get_diagram_node
 
 def generate_diagram_script(plan_path, output_script_path):
     with open(plan_path, 'r') as f:
@@ -24,22 +7,22 @@ def generate_diagram_script(plan_path, output_script_path):
 
     resources = plan.get('configuration', {}).get('root_module', {}).get('resources', [])
     
-    # Store parsed nodes
-    nodes = {}  # address -> {class, name, var_name, parent_addr}
+    nodes = {}  # address -> {class_name, name, var_name, parent_addr}
     clusters = {} # address -> {type: 'vpc'|'subnet', name: str, children: [], var_name: str}
     edges = [] # (source_var, target_var)
+    used_imports = set(["from diagrams import Diagram, Cluster"])
 
     # 1. Identify Clusters (VPCs and Subnets)
     for res in resources:
         res_type = res['type']
         address = res['address']
-        # Get the actual name value from expressions if available, else use resource name
-        # In tfplan, constant_value is often where the name is
-        name_val = res['name'] # default to alias
+        
+        name_val = res['name']
         if 'expressions' in res and 'name' in res['expressions']:
             if 'constant_value' in res['expressions']['name']:
                 name_val = res['expressions']['name']['constant_value']
         
+        # We explicitly treat networks and subnets as Clusters
         if res_type == 'google_compute_network':
             clusters[address] = {'type': 'vpc', 'name': name_val, 'children': [], 'var_name': f"vpc_{res['name'].replace('-', '_')}"}
         elif res_type == 'google_compute_subnetwork':
@@ -73,8 +56,6 @@ def generate_diagram_script(plan_path, output_script_path):
         return None
 
     # 2. Identify Nodes and Assign to Clusters
-    used_imports = set(["from diagrams import Diagram, Cluster"])
-
     for res in resources:
         res_type = res['type']
         address = res['address']
@@ -85,20 +66,22 @@ def generate_diagram_script(plan_path, output_script_path):
             if 'constant_value' in res['expressions']['name']:
                 name_val = res['expressions']['name']['constant_value']
         
-        if res_type in TF_TO_DIAGRAMS:
-            diagram_class = TF_TO_DIAGRAMS[res_type]
-            var_name = f"{diagram_class.lower()}_{res['name'].replace('-', '_')}"
+        # Use mapper to get the Diagram class
+        diagram_class = get_diagram_node(res_type)
+        
+        if diagram_class:
+            class_name = diagram_class.__name__
+            module_name = diagram_class.__module__
+            var_name = f"{class_name.lower()}_{res['name'].replace('-', '_')}"
             
-            used_imports.add(DIAGRAM_IMPORTS[diagram_class])
+            # Add dynamic import
+            used_imports.add(f"from {module_name} import {class_name}")
             
             # Find parent
             expressions = res.get('expressions', {})
             parent_addr = find_parent_cluster(expressions)
             
-            # Special handling: SQL Instances often reference VPCs (private IP) but aren't "inside" them in the same way VMs are. 
-            # But visually it makes sense to put them in the VPC or Subnet if referenced.
-            
-            nodes[address] = {'class': diagram_class, 'name': name_val, 'var_name': var_name, 'parent_addr': parent_addr}
+            nodes[address] = {'class_name': class_name, 'name': name_val, 'var_name': var_name, 'parent_addr': parent_addr}
 
     # 3. Identify Edges (Dependencies)
     for res in resources:
@@ -147,7 +130,7 @@ def generate_diagram_script(plan_path, output_script_path):
         cluster_nodes = [addr for addr, node in nodes.items() if node['parent_addr'] == cluster_addr]
         for node_addr in cluster_nodes:
             node = nodes[node_addr]
-            lines.append(f'{indent}    {node["var_name"]} = {node["class"]}("{node["name"]}")')
+            lines.append(f'{indent}    {node["var_name"]} = {node["class_name"]}("{node["name"]}")')
             written_nodes.add(node_addr)
             
         # Write child clusters (Subnets inside VPCs)
@@ -156,10 +139,6 @@ def generate_diagram_script(plan_path, output_script_path):
              child_subnets = []
              for sub_addr, sub in clusters.items():
                  if sub['type'] == 'subnet':
-                     # We need to check the subnet resource for ref to this VPC
-                     # Optimization: we can just check 'parent_ref' if we stored it for clusters too.
-                     # Let's just quick check resources list again or store it earlier.
-                     # Doing a quick lookup:
                      res = next(r for r in resources if r['address'] == sub_addr)
                      if find_parent_cluster(res.get('expressions', {})) == cluster_addr:
                          child_subnets.append(sub_addr)
@@ -172,17 +151,11 @@ def generate_diagram_script(plan_path, output_script_path):
     for vpc_addr in vpcs:
         write_cluster(vpc_addr)
         
-    # Top Level Subnets (orphaned)
-    subnets = [addr for addr, c in clusters.items() if c['type'] == 'subnet']
-    # Check if subnet was already written (referenced by a VPC) - wait, my recursive writer doesn't track written CLUSTERS.
-    # We should.
-    
-    # Better approach: Just iterate top-level containers (VPCs + Global)
     # Global nodes (no parent)
     global_nodes = [addr for addr, node in nodes.items() if node['parent_addr'] is None]
     for node_addr in global_nodes:
         node = nodes[node_addr]
-        lines.append(f'    {node["var_name"]} = {node["class"]}("{node["name"]}")')
+        lines.append(f'    {node["var_name"]} = {node["class_name"]}("{node["name"]}")')
         written_nodes.add(node_addr)
 
     lines.append("")
@@ -194,6 +167,3 @@ def generate_diagram_script(plan_path, output_script_path):
         f.write("\n".join(lines))
     
     print(f"Generated {output_script_path}")
-
-if __name__ == "__main__":
-    generate_diagram_script("terraform_infra/tfplan.json", "viz_from_plan.py")
