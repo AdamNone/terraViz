@@ -22,3 +22,6 @@ output/*.svg
 
 # Virtual Envs
 .venv
+
+# Other
+.DS_STORE
