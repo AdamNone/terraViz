@@ -1,13 +1,19 @@
-from src.generator import generate_diagram_script
+from src.generator import create_diagram
 import sys
+import os
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: python main.py <path_to_tfplan.json> <output_script.py>")
-        # Default for convenience/testing if arguments not provided
-        # But for CLI usage, it's better to be explicit or provide defaults.
-        # Let's provide the default as in the previous script for backward compat/ease.
-        print("Using defaults: terraform_infra/tfplan.json -> viz_from_plan.py")
-        generate_diagram_script("terraform_infra/tfplan.json", "viz_from_plan.py")
+    if len(sys.argv) < 2:
+        # Default behavior
+        default_plan = "terraform_infra/tfplan.json"
+        if os.path.exists(default_plan):
+            print(f"Using default plan: {default_plan}")
+            create_diagram(default_plan)
+        else:
+            print("Usage: python main.py <path_to_tfplan.json> [output_filename]")
+            print(f"Error: Default file '{default_plan}' not found.")
+            sys.exit(1)
     else:
-        generate_diagram_script(sys.argv[1], sys.argv[2])
+        plan_path = sys.argv[1]
+        output_name = sys.argv[2] if len(sys.argv) > 2 else "gcp_infra_diagram"
+        create_diagram(plan_path, output_name)

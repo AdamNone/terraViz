@@ -1,16 +1,16 @@
-import json
+from diagrams import Diagram, Cluster
 from src.mapper import get_diagram_node
+import json
 
-def generate_diagram_script(plan_path, output_script_path):
+def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=True):
     with open(plan_path, 'r') as f:
         plan = json.load(f)
 
     resources = plan.get('configuration', {}).get('root_module', {}).get('resources', [])
     
-    nodes = {}  # address -> {class_name, name, var_name, parent_addr}
-    clusters = {} # address -> {type: 'vpc'|'subnet', name: str, children: [], var_name: str}
-    edges = [] # (source_var, target_var)
-    used_imports = set(["from diagrams import Diagram, Cluster"])
+    nodes = {}  # address -> {class_ref, name, parent_addr}
+    clusters = {} # address -> {type: 'vpc'|'subnet', name: str}
+    edges = [] # (source_addr, target_addr)
 
     # 1. Identify Clusters (VPCs and Subnets)
     for res in resources:
@@ -22,11 +22,10 @@ def generate_diagram_script(plan_path, output_script_path):
             if 'constant_value' in res['expressions']['name']:
                 name_val = res['expressions']['name']['constant_value']
         
-        # We explicitly treat networks and subnets as Clusters
         if res_type == 'google_compute_network':
-            clusters[address] = {'type': 'vpc', 'name': name_val, 'children': [], 'var_name': f"vpc_{res['name'].replace('-', '_')}"}
+            clusters[address] = {'type': 'vpc', 'name': name_val}
         elif res_type == 'google_compute_subnetwork':
-             clusters[address] = {'type': 'subnet', 'name': name_val, 'children': [], 'var_name': f"subnet_{res['name'].replace('-', '_')}"}
+             clusters[address] = {'type': 'subnet', 'name': name_val}
 
     # Helper to find parent: Prioritize Subnet over VPC
     def find_parent_cluster(res_expressions):
@@ -70,18 +69,11 @@ def generate_diagram_script(plan_path, output_script_path):
         diagram_class = get_diagram_node(res_type)
         
         if diagram_class:
-            class_name = diagram_class.__name__
-            module_name = diagram_class.__module__
-            var_name = f"{class_name.lower()}_{res['name'].replace('-', '_')}"
-            
-            # Add dynamic import
-            used_imports.add(f"from {module_name} import {class_name}")
-            
             # Find parent
             expressions = res.get('expressions', {})
             parent_addr = find_parent_cluster(expressions)
             
-            nodes[address] = {'class_name': class_name, 'name': name_val, 'var_name': var_name, 'parent_addr': parent_addr}
+            nodes[address] = {'class_ref': diagram_class, 'name': name_val, 'parent_addr': parent_addr}
 
     # 3. Identify Edges (Dependencies)
     for res in resources:
@@ -110,60 +102,56 @@ def generate_diagram_script(plan_path, output_script_path):
                  if source_addr == target_addr: continue
                  if ref == target_addr or ref.startswith(target_addr + "."):
                      # Found a dependency: Source -> Target
-                     edges.append((nodes[source_addr]['var_name'], nodes[target_addr]['var_name']))
+                     edges.append((source_addr, target_addr))
 
-    # 4. Generate Code
-    lines = []
-    lines.extend(sorted(list(used_imports)))
-    lines.append("")
-    lines.append(f'with Diagram("Terraform Plan Infrastructure", show=False, filename="tf_plan_diagram"):')
+    # 4. Render Diagram Directly
+    node_instances = {} # address -> instantiated Diagram node object
     
-    written_nodes = set()
+    # We use a graph attribute to control direction or other viz properties if needed
+    graph_attr = {
+        "fontsize": "20"
+    }
 
-    # Recursive writer for clusters
-    def write_cluster(cluster_addr, indent_level=1):
-        indent = "    " * indent_level
-        cluster = clusters[cluster_addr]
-        lines.append(f'{indent}with Cluster("{cluster["name"]}"):')
+    with Diagram("Terraform Infrastructure", show=show, filename=output_filename, graph_attr=graph_attr):
         
-        # Write nodes belonging to this cluster
-        cluster_nodes = [addr for addr, node in nodes.items() if node['parent_addr'] == cluster_addr]
-        for node_addr in cluster_nodes:
-            node = nodes[node_addr]
-            lines.append(f'{indent}    {node["var_name"]} = {node["class_name"]}("{node["name"]}")')
-            written_nodes.add(node_addr)
+        # Recursive writer for clusters
+        def render_cluster(cluster_addr):
+            cluster_data = clusters[cluster_addr]
+            with Cluster(cluster_data["name"]):
+                # Instantiate nodes belonging to this cluster
+                cluster_node_addrs = [addr for addr, node in nodes.items() if node['parent_addr'] == cluster_addr]
+                for node_addr in cluster_node_addrs:
+                    node_data = nodes[node_addr]
+                    # Create the node!
+                    node_instances[node_addr] = node_data['class_ref'](node_data['name'])
+                
+                # Render child clusters (Subnets inside VPCs)
+                if cluster_data['type'] == 'vpc':
+                     # Find subnets that reference this VPC
+                     child_subnets = []
+                     for sub_addr, sub in clusters.items():
+                         if sub['type'] == 'subnet':
+                             res = next(r for r in resources if r['address'] == sub_addr)
+                             if find_parent_cluster(res.get('expressions', {})) == cluster_addr:
+                                 child_subnets.append(sub_addr)
+                     
+                     for sub_addr in child_subnets:
+                         render_cluster(sub_addr)
+
+        # Top Level VPCs
+        vpcs = [addr for addr, c in clusters.items() if c['type'] == 'vpc']
+        for vpc_addr in vpcs:
+            render_cluster(vpc_addr)
             
-        # Write child clusters (Subnets inside VPCs)
-        if cluster['type'] == 'vpc':
-             # Find subnets that reference this VPC
-             child_subnets = []
-             for sub_addr, sub in clusters.items():
-                 if sub['type'] == 'subnet':
-                     res = next(r for r in resources if r['address'] == sub_addr)
-                     if find_parent_cluster(res.get('expressions', {})) == cluster_addr:
-                         child_subnets.append(sub_addr)
-             
-             for sub_addr in child_subnets:
-                 write_cluster(sub_addr, indent_level + 1)
+        # Global nodes (no parent)
+        global_nodes = [addr for addr, node in nodes.items() if node['parent_addr'] is None]
+        for node_addr in global_nodes:
+            node_data = nodes[node_addr]
+            node_instances[node_addr] = node_data['class_ref'](node_data['name'])
 
-    # Top Level VPCs
-    vpcs = [addr for addr, c in clusters.items() if c['type'] == 'vpc']
-    for vpc_addr in vpcs:
-        write_cluster(vpc_addr)
-        
-    # Global nodes (no parent)
-    global_nodes = [addr for addr, node in nodes.items() if node['parent_addr'] is None]
-    for node_addr in global_nodes:
-        node = nodes[node_addr]
-        lines.append(f'    {node["var_name"]} = {node["class_name"]}("{node["name"]}")')
-        written_nodes.add(node_addr)
-
-    lines.append("")
-    lines.append("    # Edges")
-    for src, dst in set(edges):
-        lines.append(f"    {src} >> {dst}")
-
-    with open(output_script_path, 'w') as f:
-        f.write("\n".join(lines))
+        # Edges
+        for src, dst in set(edges):
+            if src in node_instances and dst in node_instances:
+                node_instances[src] >> node_instances[dst]
     
-    print(f"Generated {output_script_path}")
+    print(f"Diagram created: {output_filename}.png")
