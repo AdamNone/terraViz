@@ -1,0 +1,113 @@
+# TerraViz
+
+TerraViz is an open-source tool designed to visualize Terraform infrastructure plans. It parses a `tfplan.json` file and generates a diagram representing the resources and their relationships (specifically for Google Cloud Platform).
+
+## Project Structure
+
+The repository is organized to separate core logic, resource mappings, and example configurations.
+
+*   **`main.py`**: The entry point of the application. It parses command-line arguments and invokes the generator.
+*   **`src/`**: Contains the source code for the visualization engine.
+    *   **`generator.py`**: The core logic. It processes the JSON plan, identifies resources (Nodes) and container structures like VPCs and Subnets (Clusters), resolves relationships, and renders the diagram.
+    *   **`mapper.py`**: A comprehensive mapping file that links Terraform resource types (e.g., `google_compute_instance`) to their corresponding classes in the `diagrams` library (e.g., `ComputeEngine`).
+    *   **`resources/`**: Implements a **Handler Pattern**. Instead of treating all resources identically, we use "Handlers" to encapsulate logic specific to certain resource types (e.g., how to label a Compute Instance vs. a VPC).
+        *   **`registry.py`**: A factory module that selects the appropriate Handler for a given resource. If no specific handler exists, it falls back to a generic one using `mapper.py`.
+        *   **`base.py`**: Defines the base `ResourceHandler` class.
+*   **`samples/`**: Contains sample Terraform projects (e.g., `gcp_basic`, `gcp_modular`) to test the tool.
+*   **`output/`**: Default directory where generated diagrams are saved.
+
+### Why this architecture?
+We separate `mapper.py` from `resources/` to keep simple 1-to-1 mappings lightweight. The `resources/` directory allows us to scale complex logic (like custom label formatting or specific parent/child relationship handling) without cluttering the main generator code.
+
+## Local Development Setup
+
+### Prerequisites
+1.  **Python 3.8+**
+2.  **Graphviz**: This tool requires Graphviz to be installed on your system (not just the python library).
+    *   **macOS**: `brew install graphviz`
+    *   **Ubuntu**: `sudo apt-get install graphviz`
+    *   **Windows**: Download and install from the Graphviz website.
+
+### Installation
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/your-username/terraViz.git
+    cd terraViz
+    ```
+
+2.  Create and activate a virtual environment:
+    ```bash
+    python -m venv .venv
+    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    ```
+
+3.  Install Python dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+## Generating a Terraform Plan
+
+To use this tool, you first need a JSON-formatted Terraform plan.
+
+1.  **Set up Credentials**:
+    The sample projects (`samples/gcp_basic`) require a GCP Service Account key. 
+    
+    *   Create a directory for your secrets (it is already ignored in `.gitignore`):
+        ```bash
+        mkdir secrets
+        ```
+    *   Place your Google Cloud Service Account JSON key in this directory (e.g., `secrets/gcp_key.json`).
+    *   **Note**: If you don't have a real key but just want to test the *structure* (and have the terraform provider mock it or valid it structurally), you still need a file that looks like a JSON key. However, `terraform plan` generally attempts to authenticate, so a real key is recommended.
+
+2.  **Configure Terraform**:
+    Navigate to the sample directory and create a `terraform.tfvars` file (or edit the existing one) to point to your key.
+
+    ```bash
+    cd samples/gcp_basic
+    # Create/Edit terraform.tfvars
+    echo 'gcp_credentials_path = "../../secrets/gcp_key.json"' >> terraform.tfvars
+    echo 'project_id = "your-gcp-project-id"' >> terraform.tfvars
+    echo 'region = "us-central1"' >> terraform.tfvars
+    ```
+
+3.  **Generate the JSON Plan**:
+    ```bash
+    terraform init
+    terraform plan -out=tfplan
+    terraform show -json tfplan > tfplan.json
+    ```
+
+## Usage
+
+Run `main.py` from the root directory, passing the path to your generated `tfplan.json`.
+
+### Basic Command
+```bash
+python main.py samples/gcp_basic/tfplan.json
+```
+This will generate `output/gcp_basic.png`.
+
+### Changing Output Format
+You can specify the output format (e.g., `jpg`, `dot`, `pdf`). Default is `png`.
+```bash
+python main.py samples/gcp_basic/tfplan.json jpg
+```
+
+### Generating a Python Script (`--save-script`)
+If you want to tweak the diagram manually later, you can have the tool generate the Python code that reproduces the diagram.
+```bash
+python main.py samples/gcp_basic/tfplan.json --save-script
+```
+This will create `output/gcp_basic.py`. You can run this script independently:
+```bash
+python output/gcp_basic.py
+```
+
+## Contributing
+
+1.  Fork the repo.
+2.  Create a branch for your feature (`git checkout -b feature/amazing-feature`).
+3.  Commit your changes.
+4.  Push to the branch.
+5.  Open a Pull Request.
