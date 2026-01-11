@@ -1,6 +1,7 @@
 from src.generator import create_diagram
 import sys
 import os
+import argparse
 
 def ensure_output_dir():
     output_dir = "output"
@@ -9,13 +10,15 @@ def ensure_output_dir():
     return output_dir
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python main.py <path_to_tfplan.json> [output_format]")
-        print("Example: python main.py samples/gcp_basic/tfplan.json png")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Generate infrastructure diagrams from Terraform plan JSON.")
+    parser.add_argument("plan_path", help="Path to the tfplan.json file")
+    parser.add_argument("output_format", nargs="?", default="png", help="Output format (png, jpg, dot, etc.). Default: png")
+    parser.add_argument("--save-script", action="store_true", help="Save the generated Python script for manual review")
+
+    args = parser.parse_args()
     
-    plan_path = sys.argv[1]
-    output_format = sys.argv[2] if len(sys.argv) > 2 else "png"
+    plan_path = args.plan_path
+    output_format = args.output_format
     
     # Check if plan file exists
     if not os.path.exists(plan_path):
@@ -37,4 +40,4 @@ if __name__ == "__main__":
     output_filename = os.path.join(output_dir, dir_name)
     
     print(f"Generating diagram for {plan_path}...")
-    create_diagram(plan_path, output_filename=output_filename, outformat=output_format)
+    create_diagram(plan_path, output_filename=output_filename, outformat=output_format, save_script=args.save_script)

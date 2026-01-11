@@ -1,8 +1,10 @@
 from diagrams import Diagram, Cluster, Edge
 from src.resources.registry import get_resource_handler
 import json
+import re
+import os
 
-def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, outformat="png"):
+def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, outformat="png", save_script=False):
     with open(plan_path, 'r') as f:
         plan = json.load(f)
 
@@ -97,6 +99,10 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
 
         refs = search_node_refs(expressions)
         
+        # Add explicit depends_on
+        if 'depends_on' in res:
+            refs.extend(res['depends_on'])
+        
         for ref in refs:
              for target_addr in nodes:
                  if source_addr == target_addr: continue
@@ -163,3 +169,91 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
                 node_instances[src] >> node_instances[dst]
     
     print(f"Diagram created: {output_filename}.{outformat}")
+
+    # 5. Generate Script (Optional)
+    if save_script:
+        def sanitize_var_name(address):
+            clean = re.sub(r'[^a-zA-Z0-9_]', '_', address)
+            if clean[0].isdigit(): clean = "_" + clean
+            return clean
+
+        lines = []
+        
+        # Imports
+        imports = set()
+        for node in nodes.values():
+            cls = node['handler'].diagram_class
+            imports.add((cls.__module__, cls.__name__))
+        
+        sorted_imports = sorted(list(imports))
+        lines.append("from diagrams import Diagram, Cluster, Edge")
+        for module, cls_name in sorted_imports:
+            lines.append(f"from {module} import {cls_name}")
+        lines.append("")
+        
+        lines.append(f"graph_attr = {json.dumps(graph_attr, indent=4)}")
+        lines.append("")
+        
+        # Use basename for the script's internal filename reference to ensure portability
+        script_out_name = os.path.basename(output_filename)
+        
+        lines.append(f'with Diagram("Terraform Infrastructure", show=False, filename="{script_out_name}", outformat="{outformat}", graph_attr=graph_attr, direction="LR"):')
+        
+        node_vars = {} # address -> var_name
+        
+        def render_cluster_script(cluster_addr, indent_level):
+            indent = "    " * indent_level
+            cluster_data = clusters[cluster_addr]
+            label = cluster_data['label'].replace('"', '\"')
+            
+            lines.append(f'{indent}with Cluster("{label}"):')
+            
+            # Nodes
+            cluster_node_addrs = [addr for addr, node in nodes.items() if node['parent_addr'] == cluster_addr]
+            for node_addr in cluster_node_addrs:
+                node_data = nodes[node_addr]
+                cls_name = node_data['handler'].diagram_class.__name__
+                node_label_repr = repr(node_data['handler'].get_label())
+                var_name = sanitize_var_name(node_addr)
+                node_vars[node_addr] = var_name
+                
+                lines.append(f'{indent}    {var_name} = {cls_name}({node_label_repr})')
+                
+            # Child Clusters
+            if cluster_data['type'] == 'vpc':
+                 child_subnets = []
+                 for sub_addr, sub in clusters.items():
+                     if sub['type'] == 'subnet':
+                         res = next(r for r in resources if r['address'] == sub_addr)
+                         if find_parent_cluster(res.get('expressions', {})) == cluster_addr:
+                             child_subnets.append(sub_addr)
+                 
+                 for sub_addr in child_subnets:
+                     render_cluster_script(sub_addr, indent_level + 1)
+
+        # Top Level VPCs
+        for vpc_addr in vpcs:
+            render_cluster_script(vpc_addr, 1)
+            
+        # Global nodes
+        for node_addr in global_nodes:
+            node_data = nodes[node_addr]
+            cls_name = node_data['handler'].diagram_class.__name__
+            node_label_repr = repr(node_data['handler'].get_label())
+            var_name = sanitize_var_name(node_addr)
+            node_vars[node_addr] = var_name
+            lines.append(f'    {var_name} = {cls_name}({node_label_repr})')
+
+        lines.append("")
+        lines.append("    # Edges")
+        for src, dst in set(edges):
+            if src in node_vars and dst in node_vars:
+                src_var = node_vars[src]
+                dst_var = node_vars[dst]
+                lines.append(f"    {src_var} >> {dst_var}")
+
+        script_filename = output_filename + ".py"
+        with open(script_filename, "w") as f:
+            f.write("\n".join(lines))
+        
+        print(f"Script saved: {script_filename}")

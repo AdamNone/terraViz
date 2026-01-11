@@ -17,6 +17,9 @@ output/*.jpg
 output/*.dot
 output/*.svg
 
+# Output scripts
+output/*.py
+
 # Logs
 *.log
 
