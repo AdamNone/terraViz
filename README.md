@@ -58,7 +58,23 @@ To use this tool, you first need a JSON-formatted Terraform plan.
         mkdir secrets
         ```
     *   Place your Google Cloud Service Account JSON key in this directory (e.g., `secrets/gcp_key.json`).
-    *   **Note**: If you don't have a real key but just want to test the *structure* (and have the terraform provider mock it or valid it structurally), you still need a file that looks like a JSON key. However, `terraform plan` generally attempts to authenticate, so a real key is recommended.
+    *   **Note**: If you don't have a real key but just want to test the *structure*, you can use a dummy file. Terraform requires a valid-looking JSON structure even if you aren't actually applying changes to GCP.
+    
+    You can create a file at `secrets/gcp_key.json` with the following content:
+    ```json
+    {
+      "type": "service_account",
+      "project_id": "my-gcp-project-id",
+      "private_key_id": "1234567890abcdef1234567890abcdef12345678",
+      "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDh\n-----END PRIVATE KEY-----\n",
+      "client_email": "dummy@my-gcp-project-id.iam.gserviceaccount.com",
+      "client_id": "123456789012345678901",
+      "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+      "token_uri": "https://oauth2.googleapis.com/token",
+      "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+      "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/dummy%40my-gcp-project-id.iam.gserviceaccount.com"
+    }
+    ```
 
 2.  **Configure Terraform**:
     Navigate to the sample directory and create a `terraform.tfvars` file (or edit the existing one) to point to your key.
