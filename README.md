@@ -10,14 +10,13 @@ The repository is organized to separate core logic, resource mappings, and examp
 *   **`src/`**: Contains the source code for the visualization engine.
     *   **`generator.py`**: The core logic. It processes the JSON plan, identifies resources (Nodes) and container structures like VPCs and Subnets (Clusters), resolves relationships, and renders the diagram.
     *   **`mapper.py`**: A comprehensive mapping file that links Terraform resource types (e.g., `google_compute_instance`) to their corresponding classes in the `diagrams` library (e.g., `ComputeEngine`).
-    *   **`resources/`**: Implements a **Handler Pattern**. Instead of treating all resources identically, we use "Handlers" to encapsulate logic specific to certain resource types (e.g., how to label a Compute Instance vs. a VPC).
-        *   **`registry.py`**: A factory module that selects the appropriate Handler for a given resource. If no specific handler exists, it falls back to a generic one using `mapper.py`.
-        *   **`base.py`**: Defines the base `ResourceHandler` class.
-*   **`samples/`**: Contains sample Terraform projects (e.g., `gcp_basic`, `gcp_modular`) to test the tool.
-*   **`output/`**: Default directory where generated diagrams are saved.
+    *   **`utils.py`**: Helper functions for extracting values from the complex Terraform JSON structure.
+    *   **`resources/`**: Contains specific logic for extracting labels and metadata from different resource types.
+        *   **`lookup.py`**: A central registry that maps resource types to their specific label-generation functions.
+        *   **`gcp/`**: Modules (e.g., `compute.py`, `database.py`) that export simple functions (like `get_label`) to formatting resource details.
 
 ### Why this architecture?
-We separate `mapper.py` from `resources/` to keep simple 1-to-1 mappings lightweight. The `resources/` directory allows us to scale complex logic (like custom label formatting or specific parent/child relationship handling) without cluttering the main generator code.
+We separate `mapper.py` from `resources/` to keep simple 1-to-1 mappings lightweight. The `resources/` directory allows us to scale complex label generation logic without cluttering the main generator code. We avoided a heavy class-based hierarchy in favor of simple, functional components.
 
 ## Local Development Setup
 
