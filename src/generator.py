@@ -1,4 +1,4 @@
-from diagrams import Diagram, Cluster, Edge
+from diagrams import Diagram, Cluster
 from src.resources.registry import get_resource_handler
 import json
 import re
@@ -12,7 +12,6 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
     
     nodes = {}  # address -> {handler, parent_addr}
     clusters = {} # address -> {type: 'vpc'|'subnet', label: str}
-    edges = [] # (source_addr, target_addr)
 
     # 1. Identify Clusters (VPCs and Subnets) & Create Handlers
     for res in resources:
@@ -77,40 +76,7 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
             
             nodes[address] = {'handler': handler, 'parent_addr': parent_addr}
 
-    # 3. Identify Edges (Dependencies)
-    for res in resources:
-        source_addr = res['address']
-        if source_addr not in nodes: continue
-        
-        expressions = res.get('expressions', {})
-        
-        # Deep search for references to other NODES (not clusters)
-        def search_node_refs(expr_data):
-            found = []
-            if isinstance(expr_data, dict):
-                if 'references' in expr_data:
-                    found.extend(expr_data['references'])
-                for v in expr_data.values():
-                    found.extend(search_node_refs(v))
-            elif isinstance(expr_data, list):
-                for v in expr_data:
-                    found.extend(search_node_refs(v))
-            return found
-
-        refs = search_node_refs(expressions)
-        
-        # Add explicit depends_on
-        if 'depends_on' in res:
-            refs.extend(res['depends_on'])
-        
-        for ref in refs:
-             for target_addr in nodes:
-                 if source_addr == target_addr: continue
-                 if ref == target_addr or ref.startswith(target_addr + "."):
-                     # Found a dependency: Source -> Target
-                     edges.append((source_addr, target_addr))
-
-    # 4. Render Diagram
+    # 3. Render Diagram
     node_instances = {} # address -> instantiated Diagram node object
     
     # Enhanced Graph Attributes
@@ -161,16 +127,10 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
             node_data = nodes[node_addr]
             handler = node_data['handler']
             node_instances[node_addr] = handler.diagram_class(handler.get_label())
-
-        # Edges
-        for src, dst in set(edges):
-            if src in node_instances and dst in node_instances:
-                # We could potentially get edge labels from handlers if we extended the system further
-                node_instances[src] >> node_instances[dst]
     
     print(f"Diagram created: {output_filename}.{outformat}")
 
-    # 5. Generate Script (Optional)
+    # 4. Generate Script (Optional)
     if save_script:
         def sanitize_var_name(address):
             clean = re.sub(r'[^a-zA-Z0-9_]', '_', address)
@@ -186,7 +146,7 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
             imports.add((cls.__module__, cls.__name__))
         
         sorted_imports = sorted(list(imports))
-        lines.append("from diagrams import Diagram, Cluster, Edge")
+        lines.append("from diagrams import Diagram, Cluster")
         for module, cls_name in sorted_imports:
             lines.append(f"from {module} import {cls_name}")
         lines.append("")
@@ -243,14 +203,6 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
             var_name = sanitize_var_name(node_addr)
             node_vars[node_addr] = var_name
             lines.append(f'    {var_name} = {cls_name}({node_label_repr})')
-
-        lines.append("")
-        lines.append("    # Edges")
-        for src, dst in set(edges):
-            if src in node_vars and dst in node_vars:
-                src_var = node_vars[src]
-                dst_var = node_vars[dst]
-                lines.append(f"    {src_var} >> {dst_var}")
 
         script_filename = output_filename + ".py"
         with open(script_filename, "w") as f:
