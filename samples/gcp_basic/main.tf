@@ -8,22 +8,22 @@ terraform {
 }
 
 provider "google" {
-  project     = "my-gcp-project-id"
-  region      = "us-central1"
-  zone        = "us-central1-a"
+  project     = var.project_id
+  region      = var.region
+  zone        = var.zone
   credentials = file(var.gcp_credentials_path)
 }
 
 # Network
 resource "google_compute_network" "vpc_network" {
-  name                    = "main-vpc"
+  name                    = var.vpc_name
   auto_create_subnetworks = false
 }
 
 resource "google_compute_subnetwork" "subnet" {
-  name          = "main-subnet"
-  ip_cidr_range = "10.0.1.0/24"
-  region        = "us-central1"
+  name          = var.subnet_name
+  ip_cidr_range = var.subnet_cidr
+  region        = var.region
   network       = google_compute_network.vpc_network.id
 }
 
@@ -42,7 +42,7 @@ resource "google_compute_firewall" "allow_ssh_http" {
 
 # Storage
 resource "google_storage_bucket" "app_bucket" {
-  name          = "my-app-static-assets-bucket"
+  name          = var.bucket_name
   location      = "US"
   force_destroy = true
 
@@ -51,9 +51,9 @@ resource "google_storage_bucket" "app_bucket" {
 
 # Database
 resource "google_sql_database_instance" "main_db_instance" {
-  name             = "main-db-instance"
+  name             = var.db_instance_name
   database_version = "POSTGRES_14"
-  region           = "us-central1"
+  region           = var.region
 
   settings {
     tier = "db-f1-micro"
@@ -73,8 +73,8 @@ resource "google_sql_database" "database" {
 # Compute Service
 resource "google_compute_instance" "web_server" {
   name         = "web-server-instance"
-  machine_type = "e2-micro"
-  zone         = "us-central1-a"
+  machine_type = var.machine_type
+  zone         = var.zone
 
   boot_disk {
     initialize_params {
