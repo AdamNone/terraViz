@@ -38,6 +38,9 @@ if __name__ == "__main__":
     
     # Optional flag: Save the Python script used to generate the diagram
     parser.add_argument("--save-script", action="store_true", help="Save the generated Python script for manual review")
+    
+    # Optional flag: Use simplified labels
+    parser.add_argument("--simple", action="store_true", help="Use simplified labels (names only)")
 
     args = parser.parse_args()
     
@@ -67,4 +70,4 @@ if __name__ == "__main__":
     print(f"Generating diagram for {plan_path}...")
     
     # Invoke the core generator function
-    create_diagram(plan_path, output_filename=output_filename, outformat=output_format, save_script=args.save_script)
+    create_diagram(plan_path, output_filename=output_filename, outformat=output_format, save_script=args.save_script, simple=args.simple)

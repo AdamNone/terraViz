@@ -23,7 +23,7 @@ RESOURCE_LABELERS = {
     "google_compute_subnetwork": network.get_subnetwork_label,
 }
 
-def get_resource_label(resource):
+def get_resource_label(resource, simple=False):
     """
     Generates a descriptive label for a resource.
 
@@ -33,10 +33,14 @@ def get_resource_label(resource):
 
     Args:
         resource (dict): The resource dictionary from the Terraform plan.
+        simple (bool, optional): If True, returns only the resource name. Defaults to False.
 
     Returns:
         str: The generated label string.
     """
+    if simple:
+        return get_resource_name(resource)
+
     res_type = resource['type']
     
     if res_type in RESOURCE_LABELERS:

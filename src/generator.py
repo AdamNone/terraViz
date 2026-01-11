@@ -21,7 +21,7 @@ import json
 import re
 import os
 
-def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, outformat="png", save_script=False):
+def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, outformat="png", save_script=False, simple=False):
     """
     Parses a Terraform plan and generates an infrastructure diagram.
 
@@ -31,6 +31,7 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
         show (bool, optional): Whether to open the image after generation. Defaults to False.
         outformat (str, optional): Output image format (png, jpg, dot). Defaults to "png".
         save_script (bool, optional): If True, saves the Python code used to generate the diagram. Defaults to False.
+        simple (bool, optional): If True, uses simplified labels (names only). Defaults to False.
     """
     
     # Load the JSON plan
@@ -53,10 +54,10 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
         address = res['address']
         
         if res_type == 'google_compute_network':
-            label = get_resource_label(res)
+            label = get_resource_label(res, simple=simple)
             clusters[address] = {'type': 'vpc', 'label': label}
         elif res_type == 'google_compute_subnetwork':
-             label = get_resource_label(res)
+             label = get_resource_label(res, simple=simple)
              clusters[address] = {'type': 'subnet', 'label': label}
 
     # Helper function to resolve parent relationships
@@ -115,7 +116,7 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
             parent_addr = find_parent_cluster(expressions)
             
             # Generate the text label
-            label = get_resource_label(res)
+            label = get_resource_label(res, simple=simple)
             
             nodes[address] = {'diagram_class': diagram_class, 'label': label, 'parent_addr': parent_addr, 'res_type': res_type}
 
