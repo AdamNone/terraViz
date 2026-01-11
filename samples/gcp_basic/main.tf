@@ -11,7 +11,7 @@ provider "google" {
   project     = "my-gcp-project-id"
   region      = "us-central1"
   zone        = "us-central1-a"
-  credentials = file("dummy-creds.json")
+  credentials = file(var.gcp_credentials_path)
 }
 
 # Network

@@ -5,6 +5,7 @@
 *.tfplan
 *.binary
 *.json
+*.tfvars
 
 # Python
 __pycache__/
