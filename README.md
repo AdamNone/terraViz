@@ -18,6 +18,28 @@ The repository is organized to separate core logic, resource mappings, and examp
 ### Why this architecture?
 We separate `mapper.py` from `resources/` to keep simple 1-to-1 mappings lightweight. The `resources/` directory allows us to scale complex label generation logic without cluttering the main generator code. We avoided a heavy class-based hierarchy in favor of simple, functional components.
 
+## Automatic Layout & Layering
+
+To ensure the generated diagrams look professional and organized, TerraViz employs an automatic layering system.
+
+### How it Works
+The generator automatically categorizes every resource into one of five logical "buckets" (layers) based on its Terraform resource type:
+
+1.  **Security**: Firewalls, IAM roles, KMS keys, WAFs.
+2.  **Network**: VPCs, Subnets, Routers, Gateways, DNS, CDNs.
+3.  **App**: Compute instances, Cloud Functions, Containers (Kubernetes/Cloud Run).
+4.  **Data**: SQL Databases, Redis, BigTable, Firestore.
+5.  **Storage**: Cloud Storage Buckets, Filestore, Disks.
+
+### The "Invisible Edges" Technique
+Graphviz (the engine underneath the `diagrams` library) attempts to optimize the graph layout automatically, which can sometimes result in chaotic, scattered diagrams.
+
+To force a clean, **Left-to-Right** flow that mirrors standard architecture diagrams, TerraViz injects **Invisible Edges** (`style="invis"`) between the first item of each adjacent layer:
+
+`Security Node` -> `Network Node` -> `App Node` -> `Data Node` -> `Storage Node`
+
+These edges act as a skeleton for the graph, forcing the columns to align visually without drawing messy lines that clutter the final image.
+
 ## Local Development Setup
 
 ### Prerequisites
@@ -65,7 +87,7 @@ To use this tool, you first need a JSON-formatted Terraform plan.
       "type": "service_account",
       "project_id": "my-gcp-project-id",
       "private_key_id": "1234567890abcdef1234567890abcdef12345678",
-      "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDh\n-----END PRIVATE KEY-----\n",
+      "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDh\n-----END PRIVATE KEY-----",
       "client_email": "dummy@my-gcp-project-id.iam.gserviceaccount.com",
       "client_id": "123456789012345678901",
       "auth_uri": "https://accounts.google.com/o/oauth2/auth",

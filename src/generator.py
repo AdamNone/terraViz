@@ -14,7 +14,7 @@ The process involves:
 6. Optionally generating a Python script that can reproduce the diagram.
 """
 
-from diagrams import Diagram, Cluster
+from diagrams import Diagram, Cluster, Edge
 from src.mapper import get_diagram_node
 from src.resources.lookup import get_resource_label
 import json
@@ -40,7 +40,7 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
     # Extract the list of resources from the root module
     resources = plan.get('configuration', {}).get('root_module', {}).get('resources', [])
     
-    nodes = {}  # Map: resource_address -> {diagram_class, label, parent_addr}
+    nodes = {}  # Map: resource_address -> {diagram_class, label, parent_addr, res_type}
     clusters = {} # Map: resource_address -> {type: 'vpc'|'subnet', label: str}
 
     # =========================================================================
@@ -117,7 +117,7 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
             # Generate the text label
             label = get_resource_label(res)
             
-            nodes[address] = {'diagram_class': diagram_class, 'label': label, 'parent_addr': parent_addr}
+            nodes[address] = {'diagram_class': diagram_class, 'label': label, 'parent_addr': parent_addr, 'res_type': res_type}
 
     # =========================================================================
     # Step 3: Render Diagram
@@ -133,6 +133,29 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
         "ranksep": "1.0",   # Vertical separation
     }
 
+    # 1. Define your "Buckets" (The visual columns)
+    layers = {
+        "security": [], # Firewalls, WAFs
+        "network":  [], # VPCs, Subnets, Gateways
+        "app":      [], # EC2, Lambda, K8s
+        "data":     [], # RDS, DynamoDB, Redis
+        "storage":  []  # S3, GCS
+    }
+
+    def categorize_node(node_obj, rtype):
+        """Helper to sort nodes into layers"""
+        if any(x in rtype for x in ["firewall", "security", "iam", "kms"]):
+            layers["security"].append(node_obj)
+        elif any(x in rtype for x in ["network", "router", "gateway", "address", "dns", "cdn", "nat", "vpn"]):
+            layers["network"].append(node_obj)
+        elif any(x in rtype for x in ["sql", "redis", "bigtable", "firestore", "spanner", "bigquery", "data"]):
+            layers["data"].append(node_obj)
+        elif any(x in rtype for x in ["storage", "filestore", "disk"]):
+            layers["storage"].append(node_obj)
+        else:
+            # Default to app for compute instances, functions, containers etc.
+            layers["app"].append(node_obj)
+
     with Diagram("Terraform Infrastructure", show=show, filename=output_filename, outformat=outformat, graph_attr=graph_attr, direction="LR"):
         
         # Recursive function to render clusters and their contents
@@ -145,7 +168,11 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
                 for node_addr in cluster_node_addrs:
                     node_data = nodes[node_addr]
                     cls = node_data['diagram_class']
-                    node_instances[node_addr] = cls(node_data['label'])
+                    node_inst = cls(node_data['label'])
+                    node_instances[node_addr] = node_inst
+                    
+                    # Sort into layers
+                    categorize_node(node_inst, node_data['res_type'])
                 
                 # 2. Recursively render child clusters (e.g., Subnets inside this VPC)
                 if cluster_data['type'] == 'vpc':
@@ -171,8 +198,37 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
         for node_addr in global_nodes:
             node_data = nodes[node_addr]
             cls = node_data['diagram_class']
-            node_instances[node_addr] = cls(node_data['label'])
+            node_inst = cls(node_data['label'])
+            node_instances[node_addr] = node_inst
+            
+            # Sort into layers
+            categorize_node(node_inst, node_data['res_type'])
     
+        # 3. Draw the invisible edges between the first item of each bucket
+        # This forces the columns to line up Left-to-Right
+        
+        # Order: Security -> Network -> App -> Data -> Storage
+        if layers["security"] and layers["network"]:
+            layers["security"][0] >> Edge(style="invis") >> layers["network"][0]
+        
+        # If network is empty, try connecting security to app
+        if layers["security"] and not layers["network"] and layers["app"]:
+             layers["security"][0] >> Edge(style="invis") >> layers["app"][0]
+             
+        if layers["network"] and layers["app"]:
+            layers["network"][0] >> Edge(style="invis") >> layers["app"][0]
+
+        if layers["app"] and layers["data"]:
+            layers["app"][0] >> Edge(style="invis") >> layers["data"][0]
+            
+        if layers["data"] and layers["storage"]:
+            layers["data"][0] >> Edge(style="invis") >> layers["storage"][0]
+            
+        # Fallback edges if some layers are missing to ensure continuity
+        # e.g. App -> Storage if Data is missing
+        if layers["app"] and not layers["data"] and layers["storage"]:
+            layers["app"][0] >> Edge(style="invis") >> layers["storage"][0]
+
     print(f"Diagram created: {output_filename}.{outformat}")
 
     # =========================================================================
@@ -194,7 +250,7 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
             imports.add((cls.__module__, cls.__name__))
         
         sorted_imports = sorted(list(imports))
-        lines.append("from diagrams import Diagram, Cluster")
+        lines.append("from diagrams import Diagram, Cluster, Edge")
         for module, cls_name in sorted_imports:
             lines.append(f"from {module} import {cls_name}")
         lines.append("")
@@ -208,13 +264,34 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
         
         node_vars = {} # address -> var_name
         
+        # Helper to track layers for script generation
+        script_layers = {
+            "security": [],
+            "network": [],
+            "app": [],
+            "data": [],
+            "storage": []
+        }
+
+        def categorize_script_node(var_name, rtype):
+            if any(x in rtype for x in ["firewall", "security", "iam", "kms"]):
+                script_layers["security"].append(var_name)
+            elif any(x in rtype for x in ["network", "router", "gateway", "address", "dns", "cdn", "nat", "vpn"]):
+                script_layers["network"].append(var_name)
+            elif any(x in rtype for x in ["sql", "redis", "bigtable", "firestore", "spanner", "bigquery", "data"]):
+                script_layers["data"].append(var_name)
+            elif any(x in rtype for x in ["storage", "filestore", "disk"]):
+                script_layers["storage"].append(var_name)
+            else:
+                script_layers["app"].append(var_name)
+        
         # Recursive script writer for clusters
         def render_cluster_script(cluster_addr, indent_level):
             indent = "    " * indent_level
             cluster_data = clusters[cluster_addr]
-            label = cluster_data['label'].replace('"', '"')
+            label = cluster_data['label']
             
-            lines.append(f'{indent}with Cluster("{label}"):')
+            lines.append(f'{indent}with Cluster({repr(label)}):')
             
             # Nodes in cluster
             cluster_node_addrs = [addr for addr, node in nodes.items() if node['parent_addr'] == cluster_addr]
@@ -226,6 +303,7 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
                 node_vars[node_addr] = var_name
                 
                 lines.append(f'{indent}    {var_name} = {cls_name}({node_label_repr})')
+                categorize_script_node(var_name, node_data['res_type'])
                 
             # Child Clusters (Subnets in VPC)
             if cluster_data['type'] == 'vpc':
@@ -251,6 +329,29 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
             var_name = sanitize_var_name(node_addr)
             node_vars[node_addr] = var_name
             lines.append(f'    {var_name} = {cls_name}({node_label_repr})')
+            categorize_script_node(var_name, node_data['res_type'])
+
+        # Add invisible edges logic to script
+        lines.append("")
+        lines.append("    # Invisible Edges for Layout")
+        
+        if script_layers["security"] and script_layers["network"]:
+             lines.append(f'    {script_layers["security"][0]} >> Edge(style="invis") >> {script_layers["network"][0]}')
+             
+        if script_layers["security"] and not script_layers["network"] and script_layers["app"]:
+             lines.append(f'    {script_layers["security"][0]} >> Edge(style="invis") >> {script_layers["app"][0]}')
+
+        if script_layers["network"] and script_layers["app"]:
+             lines.append(f'    {script_layers["network"][0]} >> Edge(style="invis") >> {script_layers["app"][0]}')
+             
+        if script_layers["app"] and script_layers["data"]:
+             lines.append(f'    {script_layers["app"][0]} >> Edge(style="invis") >> {script_layers["data"][0]}')
+
+        if script_layers["data"] and script_layers["storage"]:
+             lines.append(f'    {script_layers["data"][0]} >> Edge(style="invis") >> {script_layers["storage"][0]}')
+             
+        if script_layers["app"] and not script_layers["data"] and script_layers["storage"]:
+             lines.append(f'    {script_layers["app"][0]} >> Edge(style="invis") >> {script_layers["storage"][0]}')
 
         script_filename = output_filename + ".py"
         with open(script_filename, "w") as f:

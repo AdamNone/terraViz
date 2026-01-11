@@ -29,3 +29,6 @@ output/*.py
 
 # Other
 .DS_STORE
+
+# Images
+gcp_basic.png
