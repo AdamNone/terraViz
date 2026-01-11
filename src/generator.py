@@ -41,6 +41,15 @@ def create_diagram(plan_path, output_filename="gcp_infra_diagram", show=False, o
     # Extract the list of resources from the root module
     resources = plan.get('configuration', {}).get('root_module', {}).get('resources', [])
     
+    # Extract resolved values (planned_values) to handle variables
+    planned_resources = plan.get('planned_values', {}).get('root_module', {}).get('resources', [])
+    planned_resources_map = {res['address']: res for res in planned_resources}
+
+    # Inject resolved values into configuration resources
+    for res in resources:
+        if res['address'] in planned_resources_map:
+             res['planned_values'] = planned_resources_map[res['address']].get('values', {})
+    
     nodes = {}  # Map: resource_address -> {diagram_class, label, parent_addr, res_type}
     clusters = {} # Map: resource_address -> {type: 'vpc'|'subnet', label: str}
 

@@ -21,6 +21,11 @@ def get_resource_value(resource, key, default=None):
     Returns:
         any: The extracted value or the default.
     """
+    # 0. Try resolved planned values first (if available)
+    # This handles cases where variables have been resolved in the plan.
+    if 'planned_values' in resource and key in resource['planned_values']:
+        return resource['planned_values'][key]
+
     # 1. Try direct key access first
     # Some attributes (like 'type', 'name', 'provider') are usually at the top level.
     if key in resource:
@@ -42,8 +47,9 @@ def get_resource_name(resource):
     Determines the logical name of the resource.
     
     Priority:
-    1. 'name' inside 'expressions' (if the name was defined via a variable/expression).
-    2. 'name' at the top level (the standard resource name).
+    1. 'name' inside 'planned_values' (resolved service name).
+    2. 'name' inside 'expressions' (if the name was defined via a variable/expression).
+    3. 'name' at the top level (the standard resource name).
 
     Args:
         resource (dict): The resource dictionary.
@@ -51,6 +57,10 @@ def get_resource_name(resource):
     Returns:
         str: The resolved name of the resource.
     """
+    # 0. Try resolved planned name first
+    if 'planned_values' in resource and 'name' in resource['planned_values']:
+        return resource['planned_values']['name']
+
     # Default to the top-level name
     name_val = resource.get('name')
     
