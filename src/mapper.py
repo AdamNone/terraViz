@@ -1,3 +1,13 @@
+"""
+Terraform to Diagrams Mapper.
+
+This module maintains the mapping between Terraform resource types (strings found in the .tf files)
+and the corresponding Python classes from the `diagrams` library. 
+
+This acts as the primary translation layer for visual representation. If a resource type 
+is missing here, it won't be rendered in the diagram.
+"""
+
 from diagrams.gcp.analytics import BigQuery, Composer, DataFusion, Dataflow, Dataproc, PubSub
 from diagrams.gcp.api import APIGateway, Apigee, Endpoints
 from diagrams.gcp.compute import AppEngine, ComputeEngine, Functions, KubernetesEngine, Run
@@ -10,6 +20,8 @@ from diagrams.gcp.security import Iam, KeyManagementService, SecretManager
 from diagrams.gcp.storage import Filestore, PersistentDisk, Storage
 
 # Mapping of Terraform resource types to Diagrams classes
+# Key: Terraform resource type string (e.g., "google_compute_instance")
+# Value: diagrams Class (e.g., ComputeEngine)
 TERRAFORM_GCP_MAPPING = {
     # Analytics
     "google_bigquery_dataset": BigQuery,
@@ -90,6 +102,12 @@ TERRAFORM_GCP_MAPPING = {
 
 def get_diagram_node(resource_type):
     """
-    Returns the Diagram class for a given Terraform resource type.
+    Retrieves the corresponding Diagrams class for a given Terraform resource type.
+
+    Args:
+        resource_type (str): The Terraform resource string (e.g., 'google_compute_instance').
+
+    Returns:
+        class or None: The Diagrams node class if found, otherwise None.
     """
     return TERRAFORM_GCP_MAPPING.get(resource_type)

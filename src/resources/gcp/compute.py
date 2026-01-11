@@ -1,17 +1,41 @@
+"""
+Compute Resource Labeler.
+
+This module handles the label generation for Google Compute Engine instances.
+It extracts details like machine type, zone, boot image, and network access configuration.
+"""
+
 from src.utils import get_resource_value, get_resource_name
 
 def get_label(resource):
+    """
+    Generates a detailed label for a google_compute_instance.
+
+    Includes:
+    - Name
+    - Machine Type (e.g., e2-micro)
+    - Zone (e.g., us-central1-a)
+    - Boot Image (shortened name)
+    - Public IP status (Static vs Ephemeral)
+
+    Args:
+        resource (dict): The resource dictionary.
+
+    Returns:
+        str: The multiline label string.
+    """
     name = get_resource_name(resource)
     machine_type = get_resource_value(resource, "machine_type", "")
     zone = get_resource_value(resource, "zone", "")
     
+    # Analyze network interfaces for external IP configuration
     network_access = []
-    
     exprs = resource.get('expressions', {})
     if 'network_interface' in exprs:
         nics = exprs['network_interface']
         if isinstance(nics, list) and len(nics) > 0:
             nic = nics[0]
+            # 'access_config' presence implies an external IP
             if 'access_config' in nic:
                 ac = nic['access_config']
                 if isinstance(ac, list) and len(ac) > 0:
@@ -20,6 +44,7 @@ def get_label(resource):
                     else:
                         network_access.append("External IP: Ephemeral")
 
+    # Extract boot image name
     image = ""
     if 'boot_disk' in exprs:
         disks = exprs['boot_disk']
@@ -28,8 +53,10 @@ def get_label(resource):
             if isinstance(init_params, list) and len(init_params) > 0:
                     img_val = init_params[0].get('image', {}).get('constant_value')
                     if img_val:
+                        # Split to get just the last part of the image path
                         image = img_val.split('/')[-1]
 
+    # Construct the final label
     label = f"{name}"
     if machine_type:
         label += f"\n{machine_type}"

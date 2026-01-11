@@ -1,6 +1,28 @@
+"""
+Database Resource Labeler.
+
+This module handles the label generation for Cloud SQL instances.
+It extracts details like database version, machine tier, and IP configuration.
+"""
+
 from src.utils import get_resource_value, get_resource_name
 
 def get_label(resource):
+    """
+    Generates a detailed label for a google_sql_database_instance.
+
+    Includes:
+    - Name
+    - Database Version (e.g., POSTGRES_14)
+    - Tier (e.g., db-f1-micro)
+    - IP Configuration (Public/Private)
+
+    Args:
+        resource (dict): The resource dictionary.
+
+    Returns:
+        str: The multiline label string.
+    """
     name = get_resource_name(resource)
     db_version = get_resource_value(resource, "database_version", "")
     
@@ -15,6 +37,7 @@ def get_label(resource):
             
             tier = setting.get('tier', {}).get('constant_value', "")
             
+            # Check for IP configuration
             if 'ip_configuration' in setting:
                 ip_configs = setting['ip_configuration']
                 if isinstance(ip_configs, list) and len(ip_configs) > 0:
@@ -27,6 +50,7 @@ def get_label(resource):
                     if 'private_network' in ip_config:
                             ip_info.append("Private IP: Enabled")
 
+    # Construct the final label
     label = f"{name}"
     if db_version:
         label += f"\n{db_version}"
